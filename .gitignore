@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Compiled Standalone Installers
+dist/
+
+# Local Testing Runtime Data
+screenshots/
+reports/
+tests.json
+history.json
+settings.json
+tests/temp_run_*
+
+# macOS files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
