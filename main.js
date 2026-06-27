@@ -100,7 +100,9 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   
   // Open devtools during development if needed
-  mainWindow.webContents.openDevTools();
+  if (!isPackaged) {
+    mainWindow.webContents.openDevTools();
+  }
 }
 
 app.whenReady().then(() => {
@@ -117,8 +119,17 @@ app.on('window-all-closed', function () {
 
 // Paths setup
 const PROJECT_DIR = __dirname;
-const TESTS_DIR = path.join(PROJECT_DIR, 'tests');
-const DATA_FILE = path.join(PROJECT_DIR, 'tests.json');
+const isPackaged = app.isPackaged;
+const DATA_DIR = isPackaged 
+  ? path.join(app.getPath('userData'), 'AgniTestPilotData') 
+  : PROJECT_DIR;
+
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+const TESTS_DIR = path.join(DATA_DIR, 'tests');
+const DATA_FILE = path.join(DATA_DIR, 'tests.json');
 
 if (!fs.existsSync(TESTS_DIR)) {
   fs.mkdirSync(TESTS_DIR, { recursive: true });
@@ -128,14 +139,14 @@ if (!fs.existsSync(DATA_FILE)) {
   fs.writeFileSync(DATA_FILE, JSON.stringify([]));
 }
 
-const HISTORY_FILE = path.join(PROJECT_DIR, 'history.json');
+const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
 if (!fs.existsSync(HISTORY_FILE)) {
   fs.writeFileSync(HISTORY_FILE, JSON.stringify([]));
 }
 
-const SETTINGS_FILE = path.join(PROJECT_DIR, 'settings.json');
+const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 const DEFAULT_SETTINGS = {
-  screenshotPath: path.join(PROJECT_DIR, 'screenshots'),
+  screenshotPath: path.join(DATA_DIR, 'screenshots'),
   defaultHeadless: false,
   reportPath: ''
 };
@@ -277,7 +288,7 @@ ipcMain.handle('start-recording', async (event, { name, description, startUrl, e
           id,
           name: name || `Recorded Test ${tests.length + 1}`,
           description: description || 'No description provided.',
-          filePath: path.relative(PROJECT_DIR, testFilePath),
+          filePath: path.join('tests', testFileName),
           startUrl: startUrl || '',
           env: env || 'dev',
           rawCode,
@@ -317,7 +328,7 @@ ipcMain.handle('rerecord-test', async (event, { testId }) => {
   }
 
   const test = tests[testIndex];
-  const absoluteFilePath = path.join(PROJECT_DIR, test.filePath);
+  const absoluteFilePath = path.join(DATA_DIR, test.filePath);
 
   return new Promise((resolve) => {
     // Clean up env variables to avoid Electron conflicts
@@ -411,7 +422,7 @@ ipcMain.handle('run-test', async (event, { testId, headless }) => {
   }
 
   const test = tests[testIndex];
-  const absoluteFilePath = path.join(PROJECT_DIR, test.filePath);
+  const absoluteFilePath = path.join(DATA_DIR, test.filePath);
 
   if (!fs.existsSync(absoluteFilePath)) {
     return { success: false, error: 'Test file does not exist on disk' };
@@ -449,6 +460,7 @@ ipcMain.handle('run-test', async (event, { testId, headless }) => {
     delete env.ELECTRON_RUN_AS_NODE;
     delete env.ELECTRON_NO_ASAR;
     delete env.NODE_OPTIONS;
+    env.NODE_PATH = path.join(PROJECT_DIR, 'node_modules');
 
     const nodeExecutable = findNodePath();
     const child = spawn(nodeExecutable, [runFilePath], {
@@ -569,7 +581,7 @@ ipcMain.handle('delete-test', async (event, testId) => {
   }
 
   const test = tests[testIndex];
-  const absoluteFilePath = path.join(PROJECT_DIR, test.filePath);
+  const absoluteFilePath = path.join(DATA_DIR, test.filePath);
 
   if (fs.existsSync(absoluteFilePath)) {
     fs.unlinkSync(absoluteFilePath);
@@ -599,7 +611,7 @@ ipcMain.handle('update-test', async (event, { testId, name, description, env, st
   if (test.rawCode) {
     try {
       const processedCode = postProcessCode(test.rawCode, options);
-      fs.writeFileSync(path.join(PROJECT_DIR, test.filePath), processedCode);
+      fs.writeFileSync(path.join(DATA_DIR, test.filePath), processedCode);
       console.log(`Re-compiled test code file for scenario id: ${testId}`);
     } catch (e) {
       console.error('Failed to update code file during edit:', e);
@@ -617,7 +629,7 @@ ipcMain.handle('read-test-code', async (event, testId) => {
   if (!test) return { success: false, error: 'Test not found' };
 
   try {
-    const code = fs.readFileSync(path.join(PROJECT_DIR, test.filePath), 'utf8');
+    const code = fs.readFileSync(path.join(DATA_DIR, test.filePath), 'utf8');
     return { success: true, code };
   } catch (error) {
     return { success: false, error: error.message };
