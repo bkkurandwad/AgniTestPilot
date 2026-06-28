@@ -9,6 +9,9 @@ Agni is designed to unify the ease-of-use of no-code visual testing with the raw
 ## ✨ Features
 
 *   🔴 **One-Click Recording**: Configures environments and launches Chromium codegen to record your actions.
+*   🌍 **Multi-Environment Starting URLs**: Configure and switch between starting URLs per environment (e.g. DEV vs PROD vs STAGING) during recording, execution, and scenario editing.
+*   🎛️ **Dedicated Parameter Editor**: Switch to a dedicated configuration view to manage dynamic input parameters and auto-sync selectors from recorded scripts.
+*   🎲 **Data Generators & Custom Format Patterns**: Configure dynamic variables for different environments. Supports Static Value, Random Phone (10 digits), Random Alpha, Random AlphaNum, Random Email, Timestamp, and **Custom Format Patterns** (e.g. `LLDDDDDD` for 2 Letters and 6 Digits).
 *   💻 **Holistic Analytics Dashboard**: View counts of recorded tests, executions, runs, passed, and failed stats with an SVG circular success ring and duration averages.
 *   📜 **Execution History & Galleries**: Every run gets a unique execution ID. Expanding a run row shows a visual grid of all screenshots captured during that specific run.
 *   🔍 **Lightbox Overlay Checkpoints**: Click any screenshot thumbnail in the execution gallery to inspect details in a full-screen modal.

@@ -230,6 +230,19 @@
                 <input type="text" id="settings-report-path" required>
               </div>
 
+              <div class="form-group">
+                <label>Manage Testing Environments</label>
+                <div class="env-manager-box">
+                  <div class="env-input-row" style="display: flex; gap: 12px; margin-bottom: 12px;">
+                    <input type="text" id="settings-new-env" placeholder="Add custom environment (e.g. staging)" style="flex: 1; min-width: 0;">
+                    <button type="button" class="btn btn-secondary" id="settings-add-env-btn" style="padding: 10px 16px;">Add Env</button>
+                  </div>
+                  <div class="env-chips" id="settings-env-chips-container" style="display: flex; flex-wrap: wrap; gap: 8px;">
+                    <!-- chips populated via JS -->
+                  </div>
+                </div>
+              </div>
+
               <div class="form-options-grid">
                 <div class="form-group-toggle" style="grid-column: 1 / span 2;">
                   <span class="toggle-label">Run Headless by Default (runs background silently)</span>
@@ -250,6 +263,27 @@
         </section>
       </div>
 
+      <!-- Scenario Parameter Editor View (Dedicated Page) -->
+      <div id="view-parameter-editor" class="content-view hidden">
+        <header class="content-header" style="display: flex; align-items: center; gap: 20px; justify-content: space-between;">
+          <div style="display: flex; align-items: center; gap: 16px;">
+            <button type="button" class="btn btn-secondary" id="btn-back-to-scenarios" style="padding: 8px 14px; font-size: 13px;">← Back to Scenarios</button>
+            <div>
+              <h2 class="page-title" id="param-editor-title">Configure Scenario Parameters</h2>
+              <p class="page-description" id="param-editor-subtitle">Set up dynamic environment parameter substitution rules and format patterns</p>
+            </div>
+          </div>
+        </header>
+
+        <section class="form-section">
+          <div class="form-container-card" style="background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px;">
+            <div id="param-editor-workspace">
+              <!-- Dynamically populated workspace via app.js -->
+            </div>
+          </div>
+        </section>
+      </div>
+
     </main>
   </div>
 
@@ -261,20 +295,8 @@
       <p class="modal-subtitle">Configure scenario parameters and launch the browser recorder</p>
 
       <form id="record-form" class="modal-form">
-        <div class="form-grid-2">
-          <div class="form-group">
-            <label for="test-env">Environment</label>
-            <select id="test-env" class="form-select-input">
-              <option value="dev" selected>Development (Dev)</option>
-              <option value="prod">Production (Prod)</option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label for="test-url">Base URL</label>
-            <input type="url" id="test-url" placeholder="https://example.com" required>
-          </div>
-        </div>
+        <!-- Dynamic environments base URLs and recording environment selector -->
+        <div id="record-envs-container" style="margin-bottom: 16px;"></div>
 
         <div class="form-group">
           <label for="test-name">Scenario Name</label>
@@ -418,20 +440,8 @@
           </div>
         </div>
 
-        <div class="form-grid-2">
-          <div class="form-group">
-            <label for="edit-test-env">Environment</label>
-            <select id="edit-test-env" class="form-select-input">
-              <option value="dev">Development (Dev)</option>
-              <option value="prod">Production (Prod)</option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label for="edit-test-url">Base URL</label>
-            <input type="url" id="edit-test-url" placeholder="https://example.com" required>
-          </div>
-        </div>
+        <!-- Dynamic environments base URLs for edit scenario -->
+        <div id="edit-envs-container" style="margin-bottom: 16px;"></div>
 
         <!-- Options: Sleep & Screenshots -->
         <div class="form-options-grid">
@@ -474,6 +484,13 @@
 
       <form id="run-confirm-form" class="modal-form">
         <input type="hidden" id="run-confirm-test-id">
+        
+        <div class="form-group" style="margin-bottom: 20px;">
+          <label for="run-confirm-env-select">Select Environment</label>
+          <select id="run-confirm-env-select" class="form-select-input" style="width: 100%; box-sizing: border-box;">
+            <!-- dynamically populated -->
+          </select>
+        </div>
         
         <div class="form-options-grid">
           <div class="form-group-toggle" style="grid-column: 1 / span 2;">
