@@ -3,6 +3,8 @@ const viewDashboard = document.getElementById('view-dashboard');
 const viewScenarios = document.getElementById('view-scenarios');
 const viewHistory = document.getElementById('view-history');
 const viewSettings = document.getElementById('view-settings');
+const viewParameterEditor = document.getElementById('view-parameter-editor');
+const btnBackToScenarios = document.getElementById('btn-back-to-scenarios');
 
 // DOM Elements - Sidebar Nav
 const navDashboard = document.getElementById('nav-dashboard');
@@ -32,8 +34,7 @@ const recordModal = document.getElementById('record-modal');
 
 // Form Inputs - Recording Form (Modal)
 const recordForm = document.getElementById('record-form');
-const testEnvSelect = document.getElementById('test-env');
-const testUrlInput = document.getElementById('test-url');
+const recordEnvsContainer = document.getElementById('record-envs-container');
 const testNameInput = document.getElementById('test-name');
 const testDescInput = document.getElementById('test-description');
 const headlessToggle = document.getElementById('headless-toggle');
@@ -49,8 +50,7 @@ const editForm = document.getElementById('edit-form');
 const editTestIdInput = document.getElementById('edit-test-id');
 const editTestNameInput = document.getElementById('edit-test-name');
 const editTestDescInput = document.getElementById('edit-test-description');
-const editTestEnvSelect = document.getElementById('edit-test-env');
-const editTestUrlInput = document.getElementById('edit-test-url');
+const editEnvsContainer = document.getElementById('edit-envs-container');
 const editTestSleepToggle = document.getElementById('edit-test-sleep-toggle');
 const editTestScreenshotToggle = document.getElementById('edit-test-screenshot-toggle');
 const editTestScreenshotPath = document.getElementById('edit-test-screenshot-path');
@@ -71,6 +71,10 @@ const settingsForm = document.getElementById('settings-form');
 const settingsScreenshotPath = document.getElementById('settings-screenshot-path');
 const settingsReportPath = document.getElementById('settings-report-path');
 const settingsHeadlessDefault = document.getElementById('settings-headless-default');
+const settingsNewEnv = document.getElementById('settings-new-env');
+const settingsAddEnvBtn = document.getElementById('settings-add-env-btn');
+const settingsEnvChipsContainer = document.getElementById('settings-env-chips-container');
+const runConfirmEnvSelect = document.getElementById('run-confirm-env-select');
 
 // Lightbox Elements
 const lightboxImg = document.getElementById('lightbox-img');
@@ -135,7 +139,8 @@ let historyFilter = 'all'; // 'all', 'passed', 'failed'
 let globalSettings = {
   screenshotPath: '/Users/bhargavkk/.gemini/antigravity/scratch/playwright-test-agent/screenshots',
   defaultHeadless: false,
-  reportPath: ''
+  reportPath: '',
+  environments: ['dev', 'prod']
 };
 
 // Initialize Application
@@ -146,7 +151,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupNavigation();
   setupEventListeners();
   setupRealtimeListeners();
-  updateUrlPlaceholder();
+  renderRecordEnvsContainer();
 });
 
 // Load settings from backend file
@@ -155,14 +160,47 @@ async function loadSettings() {
     const settings = await window.api.getSettings();
     if (settings) {
       globalSettings = settings;
+      if (!globalSettings.environments) {
+        globalSettings.environments = ['dev', 'prod'];
+      }
       settingsScreenshotPath.value = globalSettings.screenshotPath;
       settingsReportPath.value = globalSettings.reportPath || '';
       settingsHeadlessDefault.checked = globalSettings.defaultHeadless;
       testScreenshotPath.value = globalSettings.screenshotPath;
+      renderSettingsEnvChips();
     }
   } catch (error) {
     console.error('Error loading global settings:', error);
   }
+}
+
+// Render environment manager chips in Settings UI
+function renderSettingsEnvChips() {
+  if (!settingsEnvChipsContainer) return;
+  settingsEnvChipsContainer.innerHTML = '';
+  const envs = globalSettings.environments || ['dev', 'prod'];
+  
+  envs.forEach(env => {
+    const chip = document.createElement('div');
+    chip.className = 'env-chip';
+    chip.style.cssText = 'background: rgba(255,255,255,0.06); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 12px; display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: #fff; text-transform: uppercase;';
+    chip.innerHTML = `
+      <span>${env}</span>
+      <span class="delete-chip" data-env="${env}" style="cursor: pointer; color: var(--danger); font-weight: bold; font-size: 14px; line-height: 1;">×</span>
+    `;
+    
+    chip.querySelector('.delete-chip').addEventListener('click', (e) => {
+      const envToDelete = e.target.getAttribute('data-env');
+      if (globalSettings.environments.length <= 1) {
+        alert('You must have at least one environment.');
+        return;
+      }
+      globalSettings.environments = globalSettings.environments.filter(item => item !== envToDelete);
+      renderSettingsEnvChips();
+    });
+    
+    settingsEnvChipsContainer.appendChild(chip);
+  });
 }
 
 // Setup Tab Navigation
@@ -179,6 +217,7 @@ function setupNavigation() {
     viewScenarios.classList.add('hidden');
     viewHistory.classList.add('hidden');
     viewSettings.classList.add('hidden');
+    if (viewParameterEditor) viewParameterEditor.classList.add('hidden');
 
     if (targetView === 'dashboard') {
       navDashboard.classList.add('active');
@@ -196,6 +235,8 @@ function setupNavigation() {
     } else if (targetView === 'settings') {
       navSettings.classList.add('active');
       viewSettings.classList.remove('hidden');
+    } else if (targetView === 'parameter-editor') {
+      if (viewParameterEditor) viewParameterEditor.classList.remove('hidden');
     }
   };
 
@@ -204,16 +245,47 @@ function setupNavigation() {
   navHistory.addEventListener('click', () => switchView('history'));
   navSettings.addEventListener('click', () => switchView('settings'));
 
+  if (btnBackToScenarios) {
+    btnBackToScenarios.addEventListener('click', () => switchView('scenarios'));
+  }
+
   window.switchView = switchView;
 }
 
-// Update URL placeholder based on Environment Select
-function updateUrlPlaceholder() {
-  if (testEnvSelect.value === 'dev') {
-    testUrlInput.placeholder = 'http://localhost:3000';
-  } else {
-    testUrlInput.placeholder = 'https://example.com';
-  }
+// Render dynamic environments base URLs inputs inside Record Modal
+function renderRecordEnvsContainer() {
+  if (!recordEnvsContainer) return;
+  const envs = globalSettings.environments || ['dev', 'prod'];
+  
+  let envSelectOptionsHtml = '';
+  let envUrlsInputsHtml = '';
+  
+  envs.forEach(env => {
+    envSelectOptionsHtml += `<option value="${env}">${env.toUpperCase()}</option>`;
+    envUrlsInputsHtml += `
+      <div class="form-group">
+        <label for="record-url-${env}">Base URL (${env.toUpperCase()})</label>
+        <input type="url" id="record-url-${env}" class="record-env-url-input" data-env="${env}" placeholder="https://${env}.example.com" required>
+      </div>
+    `;
+  });
+
+  recordEnvsContainer.innerHTML = `
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label for="record-env-select">Select Environment to Record On</label>
+        <select id="record-env-select" class="form-select-input">
+          ${envSelectOptionsHtml}
+        </select>
+      </div>
+    </div>
+    <div style="margin-top: 12px; border-top: 1px dashed var(--border-color); padding-top: 12px;">
+      <h4 style="margin: 0 0 10px 0; color: #fff; font-size: 13px; font-family: var(--font-display);">Starting URLs per Environment</h4>
+      <div class="form-grid-2">
+        ${envUrlsInputsHtml}
+      </div>
+    </div>
+  `;
 }
 
 // Setup Realtime IPC Listeners
@@ -333,8 +405,8 @@ function applyHistoryFilter(filterType) {
 
 // Render Tests Scenarios list rows
 function renderTests() {
-  const existingRows = testsListContainer.querySelectorAll('.test-row');
-  existingRows.forEach(row => row.remove());
+  const existingContainers = testsListContainer.querySelectorAll('.scenario-item-container');
+  existingContainers.forEach(c => c.remove());
 
   if (testsList.length === 0) {
     emptyState.style.display = 'flex';
@@ -346,6 +418,9 @@ function renderTests() {
   testsListHeader.style.display = 'grid';
 
   testsList.forEach(test => {
+    const container = document.createElement('div');
+    container.className = 'scenario-item-container';
+
     const row = document.createElement('div');
     row.className = 'test-row';
     row.setAttribute('data-id', test.id);
@@ -392,14 +467,228 @@ function renderTests() {
       </div>
     `;
 
-    row.querySelector('.run-btn').addEventListener('click', () => promptRunConfirm(test.id));
-    row.querySelector('.view-code-btn').addEventListener('click', () => viewTestCode(test.id));
-    row.querySelector('.rerecord-btn').addEventListener('click', () => rerecordTestScenario(test.id));
-    row.querySelector('.edit-btn').addEventListener('click', () => openEditModal(test.id));
-    row.querySelector('.delete-btn').addEventListener('click', () => deleteTestScenario(test.id));
+    // Row click redirects to dedicated page view
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('.btn-icon')) return;
+      openParameterEditor(test.id);
+    });
 
-    testsListContainer.appendChild(row);
+    row.querySelector('.run-btn').addEventListener('click', (e) => { e.stopPropagation(); promptRunConfirm(test.id); });
+    row.querySelector('.view-code-btn').addEventListener('click', (e) => { e.stopPropagation(); viewTestCode(test.id); });
+    row.querySelector('.rerecord-btn').addEventListener('click', (e) => { e.stopPropagation(); rerecordTestScenario(test.id); });
+    row.querySelector('.edit-btn').addEventListener('click', (e) => { e.stopPropagation(); openEditModal(test.id); });
+    row.querySelector('.delete-btn').addEventListener('click', (e) => { e.stopPropagation(); deleteTestScenario(test.id); });
+
+    container.appendChild(row);
+    testsListContainer.appendChild(container);
   });
+}
+
+// Render dedicated parameters editor workspace and switch view
+function openParameterEditor(testId) {
+  const test = testsList.find(t => t.id === testId);
+  if (!test) return;
+
+  const workspace = document.getElementById('param-editor-workspace');
+  if (!workspace) return;
+
+  document.getElementById('param-editor-title').innerText = `Configure Parameters: ${test.name}`;
+
+  const envs = globalSettings.environments || ['dev', 'prod'];
+  const params = test.parameters || [];
+
+  if (params.length === 0) {
+    workspace.innerHTML = `
+      <div style="text-align: center; padding: 40px 0;">
+        <p style="font-size:15px; color:var(--text-secondary); margin-bottom: 20px;">No input fields detected in this scenario script.</p>
+        <button type="button" class="btn btn-secondary" onclick="window.switchView('scenarios')">Back to Scenarios</button>
+      </div>
+    `;
+    window.switchView('parameter-editor');
+    return;
+  }
+
+  let html = `
+    <div class="params-editor-box">
+      <div style="overflow-x: auto;">
+        <table class="params-table" style="width: 100%; border-collapse: collapse; font-size: 13px;">
+          <thead>
+            <tr>
+              <th style="text-align: left; padding: 12px 10px; color: var(--text-muted); border-bottom: 1px solid var(--border-color); width: 30%;">Locator / Selector</th>
+              <th style="text-align: left; padding: 12px 10px; color: var(--text-muted); border-bottom: 1px solid var(--border-color);">Environment Configurations & Generation Rules</th>
+              <th style="text-align: right; padding: 12px 10px; color: var(--text-muted); border-bottom: 1px solid var(--border-color); width: 15%;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+  `;
+
+  params.forEach(param => {
+    html += `
+      <tr class="param-row" data-param-id="${param.id}" style="border-bottom: 1px solid rgba(255,255,255,0.04);">
+        <td style="padding: 16px 10px; font-family: var(--font-code); color: #60a5fa; vertical-align: top;" title="${escapeHTML(param.selector)}">
+          ${escapeHTML(param.selector)}
+        </td>
+        <td style="padding: 16px 10px;">
+          <div style="display: flex; flex-direction: column; gap: 12px;">
+    `;
+
+    envs.forEach(env => {
+      const rule = (param.envRules && param.envRules[env]) || { type: 'static', value: param.originalValue };
+      const showInput = rule.type === 'static' || rule.type === 'custom-pattern';
+      const placeholder = rule.type === 'custom-pattern' 
+        ? 'e.g. LLDDDDD (L=Letter, D=Digit, X=AlphaNum)' 
+        : 'Enter static value...';
+      
+      html += `
+            <div class="env-rule-item" data-env="${env}" style="display: flex; align-items: center; gap: 12px;">
+              <span class="badge" style="width: 60px; text-align: center; text-transform: uppercase; font-weight: 600; padding: 4px 6px;">${env}</span>
+              
+              <select class="param-rule-select form-select-input" style="padding: 6px 10px; font-size: 12px; margin: 0; width: 180px;">
+                <option value="static" ${rule.type === 'static' ? 'selected' : ''}>Static Value</option>
+                <option value="random-phone" ${rule.type === 'random-phone' ? 'selected' : ''}>Random Phone (10 digits)</option>
+                <option value="random-alpha" ${rule.type === 'random-alpha' ? 'selected' : ''}>Random Alpha</option>
+                <option value="random-alphanumeric" ${rule.type === 'random-alphanumeric' ? 'selected' : ''}>Random AlphaNum</option>
+                <option value="random-email" ${rule.type === 'random-email' ? 'selected' : ''}>Random Email</option>
+                <option value="timestamp" ${rule.type === 'timestamp' ? 'selected' : ''}>Timestamp</option>
+                <option value="custom-pattern" ${rule.type === 'custom-pattern' ? 'selected' : ''}>Custom Format Pattern</option>
+              </select>
+              
+              <input type="text" class="param-rule-value" value="${escapeHTML(rule.value || '')}" 
+                     style="padding: 6px 10px; font-size: 12px; margin: 0; flex: 1; min-width: 150px; ${showInput ? '' : 'display: none;'}" 
+                     placeholder="${placeholder}">
+            </div>
+      `;
+    });
+
+    html += `
+          </div>
+        </td>
+        <td style="padding: 16px 10px; text-align: right; vertical-align: top;">
+          <button type="button" class="btn btn-secondary btn-xs copy-all-btn" style="padding: 6px 10px; font-size: 11px;">Copy to All</button>
+        </td>
+      </tr>
+    `;
+  });
+
+  html += `
+          </tbody>
+        </table>
+      </div>
+      <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+        <button type="button" class="btn btn-secondary" onclick="window.switchView('scenarios')" style="padding: 10px 20px;">Cancel</button>
+        <button type="button" class="btn btn-primary btn-save-params" style="padding: 10px 24px; font-weight: 600;">Save Configurations</button>
+      </div>
+    </div>
+  `;
+
+  workspace.innerHTML = html;
+
+  // Add event listeners inside table rows
+  const rows = workspace.querySelectorAll('.param-row');
+  rows.forEach(row => {
+    const envRuleItems = row.querySelectorAll('.env-rule-item');
+    envRuleItems.forEach(item => {
+      const select = item.querySelector('.param-rule-select');
+      const input = item.querySelector('.param-rule-value');
+      
+      select.addEventListener('change', () => {
+        if (select.value === 'static' || select.value === 'custom-pattern') {
+          input.style.display = '';
+          input.placeholder = select.value === 'custom-pattern' 
+            ? 'e.g. LLDDDDD (L=Letter, D=Digit, X=AlphaNum)' 
+            : 'Enter static value...';
+        } else {
+          input.style.display = 'none';
+        }
+      });
+    });
+
+    const copyAllBtn = row.querySelector('.copy-all-btn');
+    copyAllBtn.addEventListener('click', () => {
+      const firstItem = envRuleItems[0];
+      const sourceSelect = firstItem.querySelector('.param-rule-select');
+      const sourceInput = firstItem.querySelector('.param-rule-value');
+      
+      const sourceType = sourceSelect.value;
+      const sourceVal = sourceInput.value;
+
+      envRuleItems.forEach((item, idx) => {
+        if (idx === 0) return;
+        const targetSelect = item.querySelector('.param-rule-select');
+        const targetInput = item.querySelector('.param-rule-value');
+        
+        targetSelect.value = sourceType;
+        targetInput.value = sourceVal;
+        
+        if (sourceType === 'static' || sourceType === 'custom-pattern') {
+          targetInput.style.display = '';
+          targetInput.placeholder = sourceType === 'custom-pattern' 
+            ? 'e.g. LLDDDDD (L=Letter, D=Digit, X=AlphaNum)' 
+            : 'Enter static value...';
+        } else {
+          targetInput.style.display = 'none';
+        }
+      });
+    });
+  });
+
+  const saveBtn = workspace.querySelector('.btn-save-params');
+  saveBtn.addEventListener('click', async () => {
+    saveBtn.disabled = true;
+    saveBtn.innerText = 'Saving...';
+    
+    const updatedParameters = [];
+    rows.forEach(row => {
+      const paramId = row.getAttribute('data-param-id');
+      const originalParam = params.find(p => p.id === paramId);
+      
+      const envRules = {};
+      const envRuleItems = row.querySelectorAll('.env-rule-item');
+      envRuleItems.forEach(item => {
+        const env = item.getAttribute('data-env');
+        const select = item.querySelector('.param-rule-select');
+        const input = item.querySelector('.param-rule-value');
+        
+        envRules[env] = {
+          type: select.value,
+          value: (select.value === 'static' || select.value === 'custom-pattern') ? input.value : ''
+        };
+      });
+
+      updatedParameters.push({
+        ...originalParam,
+        envRules
+      });
+    });
+
+    try {
+      const res = await window.api.updateTest({
+        testId: test.id,
+        name: test.name,
+        description: test.description,
+        env: test.env,
+        startUrls: test.startUrls,
+        options: test.options,
+        parameters: updatedParameters
+      });
+
+      if (res.success) {
+        alert('Configurations saved successfully!');
+        await loadTests();
+        window.switchView('scenarios');
+      } else {
+        alert(`Failed to save: ${res.error}`);
+        saveBtn.disabled = false;
+        saveBtn.innerText = 'Save Configurations';
+      }
+    } catch (e) {
+      alert(`System Error saving configurations: ${e.message}`);
+      saveBtn.disabled = false;
+      saveBtn.innerText = 'Save Configurations';
+    }
+  });
+
+  window.switchView('parameter-editor');
 }
 
 // Render History view rows
@@ -547,8 +836,17 @@ async function startRecordingFlow(e) {
   
   const name = testNameInput.value.trim();
   const description = testDescInput.value.trim();
-  const startUrl = testUrlInput.value.trim();
-  const env = testEnvSelect.value;
+
+  // Read environment URLs map
+  const startUrls = {};
+  const urlInputs = recordEnvsContainer.querySelectorAll('.record-env-url-input');
+  urlInputs.forEach(input => {
+    const envKey = input.getAttribute('data-env');
+    startUrls[envKey] = input.value.trim();
+  });
+
+  const recordEnvSelect = document.getElementById('record-env-select');
+  const recordEnv = recordEnvSelect ? recordEnvSelect.value : 'dev';
 
   const addSleep = testSleepToggle.checked;
   const addScreenshots = testScreenshotToggle.checked;
@@ -564,12 +862,12 @@ async function startRecordingFlow(e) {
   openOverlay(recordingStatus);
 
   try {
-    const result = await window.api.startRecording({ name, description, startUrl, env, options });
+    const result = await window.api.startRecording({ name, description, startUrls, recordEnv, options });
     closeOverlay(recordingStatus);
 
     if (result.success) {
       recordForm.reset();
-      updateUrlPlaceholder();
+      renderRecordEnvsContainer();
       testScreenshotPath.value = globalSettings.screenshotPath;
       screenshotPathContainer.classList.add('hidden');
       
@@ -593,6 +891,21 @@ function promptRunConfirm(testId) {
   runConfirmSubtitle.innerText = `You are about to execute scenario: ${test.name}`;
   runConfirmHeadlessToggle.checked = globalSettings.defaultHeadless;
 
+  // Populate Environments Select Dropdown
+  if (runConfirmEnvSelect) {
+    runConfirmEnvSelect.innerHTML = '';
+    const envs = globalSettings.environments || ['dev', 'prod'];
+    envs.forEach(env => {
+      const opt = document.createElement('option');
+      opt.value = env;
+      opt.innerText = env.toUpperCase();
+      if (env === test.env) {
+        opt.selected = true;
+      }
+      runConfirmEnvSelect.appendChild(opt);
+    });
+  }
+
   openOverlay(runConfirmModal);
 }
 
@@ -602,13 +915,14 @@ async function runTestScenarioConfirm(e) {
 
   const testId = runConfirmTestId.value;
   const isHeadless = runConfirmHeadlessToggle.checked;
+  const runEnv = runConfirmEnvSelect ? runConfirmEnvSelect.value : 'dev';
 
   closeOverlay(runConfirmModal);
-  runTestScenarioExec(testId, isHeadless);
+  runTestScenarioExec(testId, isHeadless, runEnv);
 }
 
 // Actual test execution logic
-async function runTestScenarioExec(testId, isHeadless) {
+async function runTestScenarioExec(testId, isHeadless, runEnv) {
   const test = testsList.find(t => t.id === testId);
   if (!test) return;
 
@@ -636,7 +950,7 @@ async function runTestScenarioExec(testId, isHeadless) {
   }, 100);
 
   try {
-    const res = await window.api.runTest({ testId, headless: isHeadless });
+    const res = await window.api.runTest({ testId, headless: isHeadless, runEnv });
     clearInterval(timerInterval);
     if (!res.success) {
       appendLog(`\nExecution Failed: ${res.error || 'Check browser details.'}\n`, 'stderr');
@@ -703,8 +1017,44 @@ function openEditModal(testId) {
   editTestIdInput.value = test.id;
   editTestNameInput.value = test.name;
   editTestDescInput.value = test.description || '';
-  editTestEnvSelect.value = test.env || 'dev';
-  editTestUrlInput.value = test.startUrl || '';
+
+  // Render edit environments container dynamically
+  if (editEnvsContainer) {
+    const envs = globalSettings.environments || ['dev', 'prod'];
+    const testStartUrls = test.startUrls || {};
+    
+    let editEnvSelectOptionsHtml = '';
+    let editEnvUrlsInputsHtml = '';
+    
+    envs.forEach(env => {
+      const isSelected = (test.env || 'dev') === env;
+      editEnvSelectOptionsHtml += `<option value="${env}" ${isSelected ? 'selected' : ''}>${env.toUpperCase()}</option>`;
+      const val = testStartUrls[env] || (env === test.env ? test.startUrl : '');
+      editEnvUrlsInputsHtml += `
+        <div class="form-group">
+          <label for="edit-url-${env}">Base URL (${env.toUpperCase()})</label>
+          <input type="url" id="edit-url-${env}" class="edit-env-url-input" data-env="${env}" value="${escapeHTML(val)}" placeholder="https://${env}.example.com" required>
+        </div>
+      `;
+    });
+
+    editEnvsContainer.innerHTML = `
+      <div class="form-grid-2">
+        <div class="form-group">
+          <label for="edit-test-env-select">Default Environment</label>
+          <select id="edit-test-env-select" class="form-select-input">
+            ${editEnvSelectOptionsHtml}
+          </select>
+        </div>
+      </div>
+      <div style="margin-top: 12px; border-top: 1px dashed var(--border-color); padding-top: 12px;">
+        <h4 style="margin: 0 0 10px 0; color: #fff; font-size: 13px; font-family: var(--font-display);">Starting Base URLs per Environment</h4>
+        <div class="form-grid-2">
+          ${editEnvUrlsInputsHtml}
+        </div>
+      </div>
+    `;
+  }
 
   if (test.options) {
     editTestSleepToggle.checked = !!test.options.addSleep;
@@ -733,8 +1083,18 @@ async function saveEditFlow(e) {
   const testId = editTestIdInput.value;
   const name = editTestNameInput.value.trim();
   const description = editTestDescInput.value.trim();
-  const env = editTestEnvSelect.value;
-  const startUrl = editTestUrlInput.value.trim();
+
+  // Read edit environment URLs map
+  const startUrls = {};
+  const urlInputs = editEnvsContainer.querySelectorAll('.edit-env-url-input');
+  urlInputs.forEach(input => {
+    const envKey = input.getAttribute('data-env');
+    startUrls[envKey] = input.value.trim();
+  });
+
+  const editEnvSelect = document.getElementById('edit-test-env-select');
+  const env = editEnvSelect ? editEnvSelect.value : 'dev';
+  const startUrl = startUrls[env] || '';
 
   const addSleep = editTestSleepToggle.checked;
   const addScreenshots = editTestScreenshotToggle.checked;
@@ -747,7 +1107,7 @@ async function saveEditFlow(e) {
   };
 
   try {
-    const res = await window.api.updateTest({ testId, name, description, env, startUrl, options });
+    const res = await window.api.updateTest({ testId, name, description, env, startUrl, startUrls, options });
     closeOverlay(editModal);
     if (res.success) {
       loadTests();
@@ -772,7 +1132,8 @@ async function saveSettingsFlow(e) {
     const res = await window.api.saveSettings({ 
       screenshotPath: pathVal, 
       reportPath: reportPathVal, 
-      defaultHeadless: headlessVal 
+      defaultHeadless: headlessVal,
+      environments: globalSettings.environments
     });
     if (res.success) {
       globalSettings.screenshotPath = pathVal;
@@ -780,6 +1141,7 @@ async function saveSettingsFlow(e) {
       globalSettings.defaultHeadless = headlessVal;
       alert('Global configurations saved successfully!');
       testScreenshotPath.value = pathVal;
+      renderSettingsEnvChips();
     } else {
       alert('Failed to save settings configurations.');
     }
@@ -862,7 +1224,28 @@ function escapeHTML(str) {
 
 // Setup Event Listeners
 function setupEventListeners() {
-  testEnvSelect.addEventListener('change', updateUrlPlaceholder);
+
+  if (settingsAddEnvBtn) {
+    settingsAddEnvBtn.addEventListener('click', () => {
+      const newEnv = settingsNewEnv.value.trim().toLowerCase();
+      if (!newEnv) return;
+      
+      const cleanEnv = newEnv.replace(/[^a-zA-Z0-9_-]/g, '');
+      if (!cleanEnv) return;
+
+      if (!globalSettings.environments) {
+        globalSettings.environments = ['dev', 'prod'];
+      }
+
+      if (globalSettings.environments.includes(cleanEnv)) {
+        alert('Environment already exists!');
+        return;
+      }
+      globalSettings.environments.push(cleanEnv);
+      settingsNewEnv.value = '';
+      renderSettingsEnvChips();
+    });
+  }
 
   testScreenshotToggle.addEventListener('change', () => {
     if (testScreenshotToggle.checked) {
@@ -892,11 +1275,11 @@ function setupEventListeners() {
   btnRunConfirmClose.addEventListener('click', () => closeOverlay(runConfirmModal));
 
   btnOpenRecordModal.addEventListener('click', () => {
-    updateUrlPlaceholder();
+    renderRecordEnvsContainer();
     openOverlay(recordModal);
   });
   btnEmptyRecord.addEventListener('click', () => {
-    updateUrlPlaceholder();
+    renderRecordEnvsContainer();
     openOverlay(recordModal);
   });
   btnCloseRecordModal.addEventListener('click', () => closeOverlay(recordModal));

@@ -7,16 +7,7 @@ let mainWindow;
 
 // Helper to find absolute path of system node binary
 function findNodePath() {
-  const isWin = process.platform === 'win32';
-  const nodeBinary = isWin ? 'node.exe' : 'node';
-  const paths = (process.env.PATH || '').split(path.delimiter);
-  for (const p of paths) {
-    const fullPath = path.join(p, nodeBinary);
-    if (fs.existsSync(fullPath)) {
-      return fullPath;
-    }
-  }
-  return 'node'; // fallback
+  return process.execPath;
 }
 
 // Helper to post-process Playwright generated code to insert sleeps and screenshots
@@ -25,7 +16,19 @@ function postProcessCode(code, options) {
   const { addSleep, addScreenshots, screenshotPath } = options;
   if (!addSleep && !addScreenshots) return code;
 
-  const lines = code.split('\n');
+  // Strip any previous screenshot/sleep injections to ensure absolute idempotency
+  const cleanCode = code
+    .replace(/\r/g, '')
+    .split('\n')
+    .filter(line => {
+      const trimmed = line.trim();
+      return !trimmed.includes('screenshotStep') && 
+             !trimmed.includes('fs.mkdirSync') &&
+             !trimmed.includes('waitForTimeout(2000)');
+    })
+    .join('\n');
+
+  const lines = cleanCode.split('\n');
   const processedLines = [];
   let step = 1;
   let hasPathImport = false;
@@ -85,6 +88,100 @@ function postProcessCode(code, options) {
   return processedLines.join('\n');
 }
 
+// Helper to parse recorded code for interactive input fields (fill, type calls)
+function parseInputsFromCode(code) {
+  const inputs = [];
+  if (!code) return inputs;
+  
+  const lines = code.split('\n');
+  lines.forEach((line) => {
+    const trimmed = line.trim();
+    
+    // Scan for fill/type statements
+    if (trimmed.startsWith('await ') && 
+        (trimmed.includes('.fill(') || trimmed.includes('.type(')) && 
+        !trimmed.includes('screenshot') && 
+        !trimmed.includes('waitForTimeout')) {
+      
+      let selector = '';
+      let originalValue = '';
+      
+      // Pattern 1: await page.fill('selector', 'value')
+      if (trimmed.includes('page.fill(')) {
+        const match = trimmed.match(/page(?:\d*)\.fill\(\s*(['"`])(.*?)\1\s*,\s*(['"`])(.*?)\3\s*\)/);
+        if (match) {
+          selector = match[2];
+          originalValue = match[4];
+        }
+      } 
+      // Pattern 2: await page.locator('selector').fill('value')
+      else if (trimmed.includes('.locator(')) {
+        const locMatch = trimmed.match(/locator\(\s*(['"`])(.*?)\1\s*\)/);
+        const valMatch = trimmed.match(/\.(fill|type)\(\s*(['"`])(.*?)\2\s*\)/);
+        if (locMatch && valMatch) {
+          selector = locMatch[2];
+          originalValue = valMatch[3];
+        }
+      }
+      // Pattern 3: await page.getByPlaceholder('placeholder').fill('value')
+      else if (trimmed.includes('.getByPlaceholder(')) {
+        const placeholderMatch = trimmed.match(/getByPlaceholder\(\s*(['"`])(.*?)\1\s*\)/);
+        const valMatch = trimmed.match(/\.(fill|type)\(\s*(['"`])(.*?)\2\s*\)/);
+        if (placeholderMatch && valMatch) {
+          selector = `Placeholder: "${placeholderMatch[2]}"`;
+          originalValue = valMatch[3];
+        }
+      }
+      // Pattern 4: await page.getByLabel('label').fill('value')
+      else if (trimmed.includes('.getByLabel(')) {
+        const labelMatch = trimmed.match(/getByLabel\(\s*(['"`])(.*?)\1\s*\)/);
+        const valMatch = trimmed.match(/\.(fill|type)\(\s*(['"`])(.*?)\2\s*\)/);
+        if (labelMatch && valMatch) {
+          selector = `Label: "${labelMatch[2]}"`;
+          originalValue = valMatch[3];
+        }
+      }
+      // Pattern 5: await page.getByRole('role', ...).fill('value')
+      else if (trimmed.includes('.getByRole(')) {
+        const roleWithNameMatch = trimmed.match(/getByRole\(\s*(['"`])(.*?)\1\s*,\s*\{\s*name:\s*(['"`])(.*?)\3\s*\}\s*\)/);
+        const valMatch = trimmed.match(/\.(fill|type)\(\s*(['"`])(.*?)\2\s*\)/);
+        if (roleWithNameMatch && valMatch) {
+          selector = `Role: ${roleWithNameMatch[2]} (Name: "${roleWithNameMatch[4]}")`;
+          originalValue = valMatch[3];
+        } else {
+          const roleMatch = trimmed.match(/getByRole\(\s*(['"`])(.*?)\1\s*[,)]/);
+          if (roleMatch && valMatch) {
+            selector = `Role: ${roleMatch[2]}`;
+            originalValue = valMatch[3];
+          }
+        }
+      }
+      // Fallback selector parse
+      else {
+        const match = trimmed.match(/page(?:\d*)\.([a-zA-Z0-9]+)\(\s*(['"`])(.*?)\2\s*\)\s*\.\s*(fill|type)\(\s*(['"`])(.*?)\5\s*\)/);
+        if (match) {
+          selector = `${match[1]}: "${match[3]}"`;
+          originalValue = match[6];
+        }
+      }
+      
+      if (selector) {
+        // Prevent duplicate selectors in the same script
+        const exists = inputs.some(inp => inp.selector === selector);
+        if (!exists) {
+          inputs.push({
+            selector,
+            originalValue,
+            lineContent: trimmed
+          });
+        }
+      }
+    }
+  });
+  
+  return inputs;
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1000,
@@ -106,6 +203,11 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Set App User Model ID for Windows shortcuts and notifications to match package.json appId
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.agni.testpilot');
+  }
+  
   createWindow();
 
   app.on('activate', function () {
@@ -148,7 +250,8 @@ const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 const DEFAULT_SETTINGS = {
   screenshotPath: path.join(DATA_DIR, 'screenshots'),
   defaultHeadless: false,
-  reportPath: ''
+  reportPath: '',
+  environments: ['dev', 'prod']
 };
 
 if (!fs.existsSync(SETTINGS_FILE)) {
@@ -165,6 +268,9 @@ function readSettings() {
       } catch (e) {
         parsed.reportPath = '';
       }
+    }
+    if (!parsed.environments || !Array.isArray(parsed.environments)) {
+      parsed.environments = ['dev', 'prod'];
     }
     return parsed;
   } catch (error) {
@@ -225,28 +331,97 @@ function writeTestsData(data) {
 
 // IPC Handling
 
+// Helper to synchronize/auto-heal parameters database entries using the latest parser
+function syncTestParameters(test) {
+  let code = test.rawCode;
+  if (!code && test.filePath) {
+    const absolutePath = path.join(DATA_DIR, test.filePath);
+    if (fs.existsSync(absolutePath)) {
+      code = fs.readFileSync(absolutePath, 'utf8');
+    }
+  }
+  if (!code) return test.parameters || [];
+  
+  const parsedInputs = parseInputsFromCode(code);
+  const currentParams = test.parameters || [];
+  const mergedParams = [];
+  
+  parsedInputs.forEach((inp, idx) => {
+    // Check if there is an existing parameter with the same selector
+    const existing = currentParams.find(p => p.selector === inp.selector);
+    if (existing) {
+      mergedParams.push({
+        ...existing,
+        lineContent: inp.lineContent,
+        originalValue: inp.originalValue
+      });
+    } else {
+      mergedParams.push({
+        id: `param_${Date.now()}_${idx}`,
+        selector: inp.selector,
+        originalValue: inp.originalValue,
+        lineContent: inp.lineContent,
+        envRules: {}
+      });
+    }
+  });
+  
+  return mergedParams;
+}
+
 // Get all tests
 ipcMain.handle('get-tests', async () => {
-  return readTestsData();
+  const tests = readTestsData();
+  let changed = false;
+  const syncedTests = tests.map(test => {
+    const syncedParams = syncTestParameters(test);
+    const originalParamCount = (test.parameters || []).length;
+    // Check if lengths differ or any selector is missing to trigger saving
+    const hasDiff = syncedParams.length !== originalParamCount || 
+      syncedParams.some((p, i) => !test.parameters[i] || test.parameters[i].selector !== p.selector);
+      
+    if (hasDiff) {
+      test.parameters = syncedParams;
+      changed = true;
+    }
+    return test;
+  });
+  if (changed) {
+    writeTestsData(syncedTests);
+  }
+  return syncedTests;
 });
 
 // Start Recording
-ipcMain.handle('start-recording', async (event, { name, description, startUrl, env, options }) => {
+ipcMain.handle('start-recording', async (event, { name, description, startUrls, recordEnv, options }) => {
   return new Promise((resolve) => {
     const id = Date.now().toString(); // unique ID
     const testFileName = `test_${id}.js`;
     const testFilePath = path.join(TESTS_DIR, testFileName);
 
+    const activeEnv = recordEnv || 'dev';
+    const launchUrl = (startUrls && startUrls[activeEnv]) || '';
+
     // Clean up env variables to avoid Electron conflicts
     const envVars = { ...process.env };
-    delete envVars.ELECTRON_RUN_AS_NODE;
+    envVars.ELECTRON_RUN_AS_NODE = '1';
     delete envVars.ELECTRON_NO_ASAR;
     delete envVars.NODE_OPTIONS;
+    
+    // Inject standard paths to PATH so spawned commands can find node
+    const additionalPaths = process.platform === 'win32'
+      ? ';C:\\Program Files\\nodejs;C:\\Program Files (x86)\\nodejs'
+      : ':/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin';
+    if (!envVars.PATH) {
+      envVars.PATH = additionalPaths.substring(1);
+    } else {
+      envVars.PATH += additionalPaths;
+    }
 
     const playwrightCli = path.join(PROJECT_DIR, 'node_modules', 'playwright', 'cli.js');
     const args = [playwrightCli, 'codegen', '--target=javascript'];
-    if (startUrl) {
-      args.push(startUrl);
+    if (launchUrl) {
+      args.push(launchUrl);
     }
     args.push('-o', testFilePath);
 
@@ -284,15 +459,26 @@ ipcMain.handle('start-recording', async (event, { name, description, startUrl, e
         }
 
         const tests = readTestsData();
+        const parsedInputs = parseInputsFromCode(codeContent);
+        const parameters = parsedInputs.map((inp, idx) => ({
+          id: `param_${Date.now()}_${idx}`,
+          selector: inp.selector,
+          originalValue: inp.originalValue,
+          lineContent: inp.lineContent,
+          envRules: {}
+        }));
+
         const newTest = {
           id,
           name: name || `Recorded Test ${tests.length + 1}`,
           description: description || 'No description provided.',
           filePath: path.join('tests', testFileName),
-          startUrl: startUrl || '',
-          env: env || 'dev',
-          rawCode,
+          startUrl: (startUrls && startUrls[activeEnv]) || '',
+          startUrls: startUrls || {},
+          env: activeEnv,
+          rawCode: rawCode,
           options: options || null,
+          parameters,
           createdAt: new Date().toISOString(),
           lastRunStatus: 'Not Run',
           lastRunTime: null,
@@ -333,9 +519,19 @@ ipcMain.handle('rerecord-test', async (event, { testId }) => {
   return new Promise((resolve) => {
     // Clean up env variables to avoid Electron conflicts
     const env = { ...process.env };
-    delete env.ELECTRON_RUN_AS_NODE;
+    env.ELECTRON_RUN_AS_NODE = '1';
     delete env.ELECTRON_NO_ASAR;
     delete env.NODE_OPTIONS;
+    
+    // Inject standard paths to PATH so spawned commands can find node
+    const additionalPaths = process.platform === 'win32'
+      ? ';C:\\Program Files\\nodejs;C:\\Program Files (x86)\\nodejs'
+      : ':/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin';
+    if (!env.PATH) {
+      env.PATH = additionalPaths.substring(1);
+    } else {
+      env.PATH += additionalPaths;
+    }
 
     const playwrightCli = path.join(PROJECT_DIR, 'node_modules', 'playwright', 'cli.js');
     const args = [playwrightCli, 'codegen', '--target=javascript'];
@@ -357,18 +553,30 @@ ipcMain.handle('rerecord-test', async (event, { testId }) => {
       console.log(`Re-recording codegen process exited with code ${code}`);
       
       if (fs.existsSync(absoluteFilePath) && fs.statSync(absoluteFilePath).size > 0) {
-        let codeContent = fs.readFileSync(absoluteFilePath, 'utf8');
+        let rawCode = fs.readFileSync(absoluteFilePath, 'utf8');
+        let codeContent = rawCode;
         
         if (test.options) {
-          codeContent = postProcessCode(codeContent, test.options);
+          codeContent = postProcessCode(rawCode, test.options);
           fs.writeFileSync(absoluteFilePath, codeContent);
         }
 
         const updatedTests = readTestsData();
         const currentIdx = updatedTests.findIndex(t => t.id === testId);
         if (currentIdx !== -1) {
+          const parsedInputs = parseInputsFromCode(codeContent);
+          const parameters = parsedInputs.map((inp, idx) => ({
+            id: `param_${Date.now()}_${idx}`,
+            selector: inp.selector,
+            originalValue: inp.originalValue,
+            lineContent: inp.lineContent,
+            envRules: {}
+          }));
+          
           updatedTests[currentIdx].createdAt = new Date().toISOString(); // update timestamp
           updatedTests[currentIdx].lastRunStatus = 'Not Run';
+          updatedTests[currentIdx].parameters = parameters;
+          updatedTests[currentIdx].rawCode = rawCode;
           writeTestsData(updatedTests);
         }
 
@@ -414,14 +622,13 @@ ipcMain.handle('save-settings', async (event, settings) => {
 // Run Test
 let activeRunners = new Map();
 
-ipcMain.handle('run-test', async (event, { testId, headless }) => {
+ipcMain.handle('run-test', async (event, { testId, headless, runEnv }) => {
   const tests = readTestsData();
-  const testIndex = tests.findIndex(t => t.id === testId);
-  if (testIndex === -1) {
+  const test = tests.find(t => t.id === testId);
+  if (!test) {
     return { success: false, error: 'Test not found' };
   }
 
-  const test = tests[testIndex];
   const absoluteFilePath = path.join(DATA_DIR, test.filePath);
 
   if (!fs.existsSync(absoluteFilePath)) {
@@ -430,8 +637,83 @@ ipcMain.handle('run-test', async (event, { testId, headless }) => {
 
   const runId = Date.now().toString(); // unique execution ID
 
+  // Evaluate parameter rules and build environment variables injection
+  const evaluatedParams = {};
+  const parameters = test.parameters || [];
+  const activeEnv = runEnv || 'dev';
+  
+  parameters.forEach(param => {
+    const rule = (param.envRules && param.envRules[activeEnv]) || { type: 'static', value: param.originalValue };
+    let finalValue = rule.value || '';
+    
+    if (rule.type === 'random-phone') {
+      finalValue = Math.floor(1000000000 + Math.random() * 9000000000).toString();
+    } else if (rule.type === 'random-alpha') {
+      const alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      finalValue = Array.from({ length: 8 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
+    } else if (rule.type === 'random-alphanumeric') {
+      const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+      finalValue = Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    } else if (rule.type === 'timestamp') {
+      finalValue = Date.now().toString();
+    } else if (rule.type === 'random-email') {
+      finalValue = `user_${Date.now()}@example.com`;
+    } else if (rule.type === 'custom-pattern') {
+      const pattern = rule.value || '';
+      let generated = '';
+      const alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      const digits = '0123456789';
+      const alphanum = alphabet + digits;
+      
+      for (let i = 0; i < pattern.length; i++) {
+        const char = pattern[i].toUpperCase();
+        if (char === 'L') {
+          generated += alphabet[Math.floor(Math.random() * alphabet.length)];
+        } else if (char === 'D') {
+          generated += digits[Math.floor(Math.random() * digits.length)];
+        } else if (char === 'X') {
+          generated += alphanum[Math.floor(Math.random() * alphanum.length)];
+        } else {
+          generated += pattern[i]; // preserve spaces, hyphens, etc.
+        }
+      }
+      finalValue = generated;
+    }
+    
+    evaluatedParams[`PARAM_${param.id}`] = finalValue;
+  });
+
+  // Resolve base URL for the selected environment
+  const envStartUrl = (test.startUrls && test.startUrls[activeEnv]) || test.startUrl;
+  if (envStartUrl) {
+    evaluatedParams['START_URL'] = envStartUrl;
+  }
+
   return new Promise((resolve) => {
     let content = fs.readFileSync(absoluteFilePath, 'utf8');
+
+    // Substitute the first page.goto URL with the environment-specific URL
+    if (envStartUrl) {
+      content = content.replace(/(await\s+page(?:\d*)\.goto\(\s*)(['"`])(.*?)\2(\s*\))/i, `$1process.env.START_URL || $2$3$2$4`);
+    }
+
+    // Substitute parameter fill/type lines in content
+    parameters.forEach(param => {
+      if (param.lineContent) {
+        const paramEnvName = `PARAM_${param.id}`;
+        const fillIndex = param.lineContent.indexOf('.fill(');
+        const typeIndex = param.lineContent.indexOf('.type(');
+        const isFill = fillIndex !== -1;
+        const actionIndex = isFill ? fillIndex : typeIndex;
+        
+        if (actionIndex !== -1) {
+          const methodCall = isFill ? 'fill' : 'type';
+          const locatorPart = param.lineContent.substring(0, actionIndex);
+          const replacementLine = `${locatorPart}.${methodCall}(process.env.${paramEnvName} || ${JSON.stringify(param.originalValue)});`;
+          content = content.replace(param.lineContent, replacementLine);
+        }
+      }
+    });
 
     // 1. Dynamic Screenshot Routing to unique folder screenshots/<testId>/<runId>
     if (test.options && test.options.addScreenshots && test.options.screenshotPath) {
@@ -456,11 +738,21 @@ ipcMain.handle('run-test', async (event, { testId, headless }) => {
     const startTime = Date.now();
 
     // Clean up env variables to avoid Electron conflicts
-    const env = { ...process.env };
-    delete env.ELECTRON_RUN_AS_NODE;
+    const env = { ...process.env, ...evaluatedParams };
+    env.ELECTRON_RUN_AS_NODE = '1';
     delete env.ELECTRON_NO_ASAR;
     delete env.NODE_OPTIONS;
     env.NODE_PATH = path.join(PROJECT_DIR, 'node_modules');
+    
+    // Inject standard paths to PATH so spawned commands can find node
+    const additionalPaths = process.platform === 'win32'
+      ? ';C:\\Program Files\\nodejs;C:\\Program Files (x86)\\nodejs'
+      : ':/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin';
+    if (!env.PATH) {
+      env.PATH = additionalPaths.substring(1);
+    } else {
+      env.PATH += additionalPaths;
+    }
 
     const nodeExecutable = findNodePath();
     const child = spawn(nodeExecutable, [runFilePath], {
@@ -593,7 +885,7 @@ ipcMain.handle('delete-test', async (event, testId) => {
 });
 
 // Update Test Info & Option Configurations (Dynamically re-post-process JavaScript files)
-ipcMain.handle('update-test', async (event, { testId, name, description, env, startUrl, options }) => {
+ipcMain.handle('update-test', async (event, { testId, name, description, env, startUrl, startUrls, options, parameters }) => {
   const tests = readTestsData();
   const testIndex = tests.findIndex(t => t.id === testId);
   if (testIndex === -1) {
@@ -603,9 +895,13 @@ ipcMain.handle('update-test', async (event, { testId, name, description, env, st
   const test = tests[testIndex];
   test.name = name;
   test.description = description;
-  test.env = env;
-  test.startUrl = startUrl;
+  test.env = env || 'dev';
+  test.startUrls = startUrls || {};
+  test.startUrl = (startUrls && startUrls[env]) || startUrl || '';
   test.options = options;
+  if (parameters) {
+    test.parameters = parameters;
+  }
 
   // Re-process the code file using rawCode and the new options!
   if (test.rawCode) {

@@ -1440,3 +1440,56 @@ body {
   font-weight: 500;
   box-shadow: 0 4px 10px rgba(250, 85%, 65%, 0.2);
 }
+
+/* Dynamic Parameters Editor Drawer Styles */
+.scenario-item-container {
+  border-bottom: 1px solid var(--border-color);
+  background-color: transparent;
+  transition: background-color 0.2s ease;
+}
+
+.scenario-item-container:hover {
+  background-color: rgba(255,255,255,0.005);
+}
+
+.scenario-details {
+  display: none;
+  background-color: rgba(10, 12, 22, 0.5);
+  border-top: 1px dashed var(--border-color);
+  animation: slideDown 0.25s ease-out;
+}
+
+.scenario-details.open {
+  display: block;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.test-row.expanded {
+  background-color: rgba(250, 85%, 65%, 0.03);
+  border-bottom: 1px solid rgba(250, 85%, 65%, 0.1);
+}
+
+.params-table th {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+
+.params-table tr:hover td {
+  background-color: rgba(255,255,255,0.01);
+}
+
+.env-chip {
+  animation: fadeIn 0.2s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
