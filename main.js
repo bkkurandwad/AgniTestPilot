@@ -7,16 +7,7 @@ let mainWindow;
 
 // Helper to find absolute path of system node binary
 function findNodePath() {
-  const isWin = process.platform === 'win32';
-  const nodeBinary = isWin ? 'node.exe' : 'node';
-  const paths = (process.env.PATH || '').split(path.delimiter);
-  for (const p of paths) {
-    const fullPath = path.join(p, nodeBinary);
-    if (fs.existsSync(fullPath)) {
-      return fullPath;
-    }
-  }
-  return 'node'; // fallback
+  return process.execPath;
 }
 
 // Helper to post-process Playwright generated code to insert sleeps and screenshots
@@ -239,9 +230,19 @@ ipcMain.handle('start-recording', async (event, { name, description, startUrl, e
 
     // Clean up env variables to avoid Electron conflicts
     const envVars = { ...process.env };
-    delete envVars.ELECTRON_RUN_AS_NODE;
+    envVars.ELECTRON_RUN_AS_NODE = '1';
     delete envVars.ELECTRON_NO_ASAR;
     delete envVars.NODE_OPTIONS;
+    
+    // Inject standard paths to PATH so spawned commands can find node
+    const additionalPaths = process.platform === 'win32'
+      ? ';C:\\Program Files\\nodejs;C:\\Program Files (x86)\\nodejs'
+      : ':/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin';
+    if (!envVars.PATH) {
+      envVars.PATH = additionalPaths.substring(1);
+    } else {
+      envVars.PATH += additionalPaths;
+    }
 
     const playwrightCli = path.join(PROJECT_DIR, 'node_modules', 'playwright', 'cli.js');
     const args = [playwrightCli, 'codegen', '--target=javascript'];
@@ -333,9 +334,19 @@ ipcMain.handle('rerecord-test', async (event, { testId }) => {
   return new Promise((resolve) => {
     // Clean up env variables to avoid Electron conflicts
     const env = { ...process.env };
-    delete env.ELECTRON_RUN_AS_NODE;
+    env.ELECTRON_RUN_AS_NODE = '1';
     delete env.ELECTRON_NO_ASAR;
     delete env.NODE_OPTIONS;
+    
+    // Inject standard paths to PATH so spawned commands can find node
+    const additionalPaths = process.platform === 'win32'
+      ? ';C:\\Program Files\\nodejs;C:\\Program Files (x86)\\nodejs'
+      : ':/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin';
+    if (!env.PATH) {
+      env.PATH = additionalPaths.substring(1);
+    } else {
+      env.PATH += additionalPaths;
+    }
 
     const playwrightCli = path.join(PROJECT_DIR, 'node_modules', 'playwright', 'cli.js');
     const args = [playwrightCli, 'codegen', '--target=javascript'];
@@ -457,10 +468,20 @@ ipcMain.handle('run-test', async (event, { testId, headless }) => {
 
     // Clean up env variables to avoid Electron conflicts
     const env = { ...process.env };
-    delete env.ELECTRON_RUN_AS_NODE;
+    env.ELECTRON_RUN_AS_NODE = '1';
     delete env.ELECTRON_NO_ASAR;
     delete env.NODE_OPTIONS;
     env.NODE_PATH = path.join(PROJECT_DIR, 'node_modules');
+    
+    // Inject standard paths to PATH so spawned commands can find node
+    const additionalPaths = process.platform === 'win32'
+      ? ';C:\\Program Files\\nodejs;C:\\Program Files (x86)\\nodejs'
+      : ':/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin';
+    if (!env.PATH) {
+      env.PATH = additionalPaths.substring(1);
+    } else {
+      env.PATH += additionalPaths;
+    }
 
     const nodeExecutable = findNodePath();
     const child = spawn(nodeExecutable, [runFilePath], {
